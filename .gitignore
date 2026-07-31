@@ -3,3 +3,4 @@ bin/
 .env.local
 .vscode/
 .idea/
+.env
