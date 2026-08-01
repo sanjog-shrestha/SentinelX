@@ -16,6 +16,7 @@ import (
 
 	"sentinelx/internal/bus"
 	"sentinelx/internal/config"
+	"sentinelx/internal/event"
 	"sentinelx/internal/httpx"
 	"sentinelx/internal/store"
 )
@@ -93,7 +94,7 @@ func main() {
 	})
 
 	mux.HandleFunc("POST /api/v1/events", func(w http.ResponseWriter, r *http.Request) {
-		var e store.Event
+		var e event.Event
 		if err := json.NewDecoder(r.Body).Decode(&e); err != nil {
 			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 			return
@@ -102,13 +103,19 @@ func main() {
 			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "source and message are required"})
 			return
 		}
+		if e.EventID == "" {
+			e.EventID = event.NewID()
+		}
 		if e.Category == "" {
 			e.Category = "generic"
 		}
 		if e.Severity == "" {
 			e.Severity = "info"
 		}
-		if err := pg.InsertEvent(r.Context(), &e); err != nil {
+		if e.OccurredAt.IsZero() {
+			e.OccurredAt = time.Now().UTC()
+		}
+		if _, err := pg.InsertEvent(r.Context(), &e); err != nil {
 			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}

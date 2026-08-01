@@ -2,19 +2,12 @@ package store
 
 import (
 	"context"
-	"time"
+	"errors"
+	"sentinelx/internal/event"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-type Event struct {
-	ID        int64     `json:"id"`
-	Source    string    `json:"source"`
-	Category  string    `json:"category"`
-	Severity  string    `json:"severity"`
-	Message   string    `json:"message"`
-	CreatedAt time.Time `json:"created_at"`
-}
 
 type Postgres struct {
 	Pool *pgxpool.Pool
@@ -30,28 +23,38 @@ func NewPostgres(ctx context.Context, url string) (*Postgres, error) {
 
 func (p *Postgres) Ping(ctx context.Context) error { return p.Pool.Ping(ctx) }
 
-func (p *Postgres) InsertEvent(ctx context.Context, e *Event) error {
-	return p.Pool.QueryRow(ctx,
-		`INSERT INTO events (source, category, severity, message)
-		VALUES ($1, $2, $3, $4)
+func (p *Postgres) InsertEvent(ctx context.Context, e *event.Event) (bool, error) {
+	err := p.Pool.QueryRow(ctx,
+		`INSERT INTO events (event_id, source, category, severity, message, occurred_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (event_id) DO NOTHING
 		RETURNING id, created_at`,
-		e.Source, e.Category, e.Severity, e.Message,
-	).Scan(&e.ID, &e.CreatedAt)
+		e.EventID, e.Source, e.Category, e.Severity, e.Message, e.OccurredAt,
+	).Scan(&e.DBID, &e.CreatedAt)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
-func (p *Postgres) ListEvents(ctx context.Context, limit int) ([]Event, error) {
+func (p *Postgres) ListEvents(ctx context.Context, limit int) ([]event.Event, error) {
 	rows, err := p.Pool.Query(ctx,
-		`SELECT id, source, category, severity, message, created_at
+		`SELECT id, event_id, source, category, severity, message, occurred_at, created_at
 		FROM events ORDER BY id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	events := []Event{}
+	events := []event.Event{}
 	for rows.Next() {
-		var e Event
-		if err := rows.Scan(&e.ID, &e.Source, &e.Category, &e.Severity, &e.Message, &e.CreatedAt); err != nil {
+		var e event.Event
+		if err := rows.Scan(&e.DBID, &e.EventID, &e.Source, &e.Category,
+			&e.Severity, &e.Message, &e.OccurredAt, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		events = append(events, e)
