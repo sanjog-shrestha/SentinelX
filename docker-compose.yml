@@ -75,6 +75,12 @@ services:
     environment:
       HTTP_ADDR: ":8082"
       NATS_URL: nats://nats:4222
+      SURICATA_EVE: /var/log/suricata/eve.json
+      ZEEK_DIR: /zeek
+      SIMULATE: "false"
+    volumes:
+      - suricata_logs:/var/log/suricata:ro
+      - zeek_logs:/zeek:ro
     ports:
       - "8082:8082"
     depends_on:
@@ -124,7 +130,44 @@ services:
       timeout: 3s
       retries: 5
 
+  victim:
+    image: nginx:alpine
+
+  traffic-gen:
+    image: alpine:3.20
+    depends_on: [victim]
+    command: >
+      sh -c "while true; do
+        wget -qO- http://victim/ >/dev/null 2>&1;
+        wget -qO- http://victim/admin >/dev/null 2>&1;
+        wget -qO- --header='User-Agent: sqlmap/1.7' http://victim/login >/dev/null 2>&1;
+        ping -c 1 victim >/dev/null 2>&1;
+        sleep 5;
+      done"
+
+  suricata:
+    image: jasonish/suricata:7.0
+    network_mode: "service:victim"
+    cap_add: [NET_ADMIN, NET_RAW, SYS_NICE]
+    command: ["-i", "eth0", "-S", "/etc/suricata/rules/local.rules"]
+    volumes:
+      - ./suricata:/rules:ro
+      - suricata_logs:/var/log/suricata
+    depends_on: [victim]
+
+  zeek:
+    image: zeek/zeek:7.0
+    network_mode: "service:victim"
+    cap_add: [NET_ADMIN, NET_RAW]
+    working_dir: /logs
+    command: ["zeek", "-i", "eth0", "LogAscii::use_json=T"]
+    volumes:
+      - zeek_logs:/logs
+    depends_on: [victim]
+
 volumes:
   postgres_data:
   redis_data:
   nats_data:
+  suricata_logs:
+  zeek_logs:

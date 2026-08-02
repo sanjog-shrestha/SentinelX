@@ -1,0 +1,4 @@
+alert icmp any any -> any any (msg:"SENTINELX ICMP ping detected"; sid:1000001; rev:1; classtype:misc-activity;)
+alert http any any -> any any (msg:"SENTINELX admin page probe"; http.uri; content:"/admin"; sid:1000002; rev:1; classtype:web-application-attack;)
+alert http any any -> any any (msg:"SENTINELX sqlmap user-agent"; http.user_agent; content:"sqlmap"; nocase; sid:1000003; rev:1; classtype:web-application-attack;)
+alert tcp any any -> any 23 (msg:"SENTINELX telnet connection attempt"; sid:1000004; rev:1; classtype:attempted-recon;)

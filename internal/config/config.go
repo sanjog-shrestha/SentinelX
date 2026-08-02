@@ -12,6 +12,9 @@ type Config struct {
 	RedisAddr   string
 	NATSURL     string
 	APIBaseURL  string
+	SuricataEve string
+	ZeekDir     string
+	Simulate    bool
 }
 
 func Load(serviceName, defaultHTTPAddr string) Config {
@@ -22,6 +25,9 @@ func Load(serviceName, defaultHTTPAddr string) Config {
 		RedisAddr:   env("REDIS_ADDR", "localhost:6379"),
 		NATSURL:     env("NATS_URL", "nats://localhost:4222"),
 		APIBaseURL:  env("API_BASE_URL", "http://localhost:8080"),
+		SuricataEve: env("SURICATA_EVE", ""),
+		ZeekDir:     env("ZEEK_DIR", ""),
+		Simulate:    env("SIMULATE", "false") == "true",
 	}
 }
 

@@ -19,6 +19,8 @@ import (
 	"sentinelx/internal/config"
 	"sentinelx/internal/event"
 	"sentinelx/internal/httpx"
+	"sentinelx/internal/normalize"
+	"sentinelx/internal/tail"
 )
 
 type template struct{ source, category, severity, message string }
@@ -66,26 +68,65 @@ func main() {
 
 	bus.StartHeartbeat(ctx, nc, cfg.ServiceName, 10*time.Second)
 
-	go func() {
-		ticker := time.NewTicker(2 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				ev := randomEvent()
-				payload, _ := json.Marshal(ev)
-				_, err := js.Publish(ctx, bus.SubjectEventsRaw, payload,
-					jetstream.WithMsgID(ev.EventID))
+	publish := func(ev *event.Event) {
+		payload, _ := json.Marshal(ev)
+		_, err := js.Publish(ctx, bus.SubjectEventsRaw, payload, jetstream.WithMsgID(ev.EventID))
+		if err != nil {
+			slog.Warn("publish failed", "err", err)
+			return
+		}
+		slog.Info("published", "source", ev.Source, "severity", ev.Severity, "msg", ev.Message)
+	}
+
+	if cfg.SuricataEve != "" {
+		lines := make(chan string, 256)
+		go tail.Follow(ctx, cfg.SuricataEve, lines)
+		go func() {
+			for line := range lines {
+				ev, err := normalize.Suricata([]byte(line))
 				if err != nil {
-					slog.Warn("publish failed", "err", err)
+					slog.Warn("suricata parse failed", "err", err)
 					continue
 				}
-				slog.Info("published", "event_id", ev.EventID, "severity", ev.Severity)
+				if ev != nil {
+					publish(ev)
+				}
 			}
-		}
-	}()
+		}()
+	}
+
+	if cfg.ZeekDir != "" {
+		lines := make(chan string, 256)
+		go tail.Follow(ctx, cfg.ZeekDir+"/conn.log", lines)
+		go func() {
+			for line := range lines {
+				ev, err := normalize.ZeekConn([]byte(line))
+				if err != nil {
+					slog.Warn("zeek parse failed", "err", err)
+					continue
+				}
+				if ev != nil {
+					publish(ev)
+				}
+			}
+		}()
+	}
+
+	if cfg.Simulate {
+		go func() {
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					ev := randomEvent()
+					publish(&ev)
+				}
+			}
+		}()
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", httpx.HealthzHandler(cfg.ServiceName))

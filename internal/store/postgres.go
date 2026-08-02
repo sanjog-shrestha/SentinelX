@@ -25,11 +25,13 @@ func (p *Postgres) Ping(ctx context.Context) error { return p.Pool.Ping(ctx) }
 
 func (p *Postgres) InsertEvent(ctx context.Context, e *event.Event) (bool, error) {
 	err := p.Pool.QueryRow(ctx,
-		`INSERT INTO events (event_id, source, category, severity, message, occurred_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO events (event_id, source, category, severity, message, 
+			occurred_at, src_ip, src_port, dst_ip, dst_port, proto)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (event_id) DO NOTHING
 		RETURNING id, created_at`,
-		e.EventID, e.Source, e.Category, e.Severity, e.Message, e.OccurredAt,
+		e.EventID, e.Source, e.Category, e.Severity, e.Message,
+		e.OccurredAt, e.SrcIP, e.SrcPort, e.DstIP, e.DstPort, e.Proto,
 	).Scan(&e.DBID, &e.CreatedAt)
 
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -43,7 +45,8 @@ func (p *Postgres) InsertEvent(ctx context.Context, e *event.Event) (bool, error
 
 func (p *Postgres) ListEvents(ctx context.Context, limit int) ([]event.Event, error) {
 	rows, err := p.Pool.Query(ctx,
-		`SELECT id, event_id, source, category, severity, message, occurred_at, created_at
+		`SELECT id, event_id, source, category, severity, message, 
+			occurred_at, created_at, src_ip, src_port, dst_ip, dst_port, proto
 		FROM events ORDER BY id DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -54,7 +57,8 @@ func (p *Postgres) ListEvents(ctx context.Context, limit int) ([]event.Event, er
 	for rows.Next() {
 		var e event.Event
 		if err := rows.Scan(&e.DBID, &e.EventID, &e.Source, &e.Category,
-			&e.Severity, &e.Message, &e.OccurredAt, &e.CreatedAt); err != nil {
+			&e.Severity, &e.Message, &e.OccurredAt, &e.CreatedAt,
+			&e.SrcIP, &e.SrcPort, &e.DstIP, &e.DstPort, &e.Proto); err != nil {
 			return nil, err
 		}
 		events = append(events, e)
