@@ -24,12 +24,9 @@ import (
 func main() {
 	cfg := config.Load("api", ":8080")
 
-	// ctx is cancelled when Docker sends SIGTERM — everything downstream
-	// (heartbeats, HTTP server) watches this one context to know when to stop.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// ── Dependencies ────────────────────────────────────────────
 	pg, err := store.NewPostgres(ctx, cfg.PostgresURL)
 	if err != nil {
 		slog.Error("postgres init failed", "err", err)
@@ -47,7 +44,6 @@ func main() {
 	}
 	defer nc.Close()
 
-	// ── Subscribe: every heartbeat on the bus is recorded in Redis ──
 	sub, err := nc.Subscribe(bus.HeartbeatSubject, func(msg *nats.Msg) {
 		var hb bus.Heartbeat
 		if err := json.Unmarshal(msg.Data, &hb); err != nil {
@@ -66,10 +62,8 @@ func main() {
 	}
 	defer func() { _ = sub.Unsubscribe() }()
 
-	// The api announces itself too.
 	bus.StartHeartbeat(ctx, nc, cfg.ServiceName, 10*time.Second)
 
-	// ── Routes ──────────────────────────────────────────────────
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", httpx.HealthzHandler(cfg.ServiceName))
@@ -123,13 +117,7 @@ func main() {
 	})
 
 	mux.HandleFunc("GET /api/v1/events", func(w http.ResponseWriter, r *http.Request) {
-		limit := 50
-		if v := r.URL.Query().Get("limit"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
-				limit = n
-			}
-		}
-		events, err := pg.ListEvents(r.Context(), limit)
+		events, err := pg.ListEvents(r.Context(), parseLimit(r, 50))
 		if err != nil {
 			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -146,9 +134,27 @@ func main() {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"total_events": n})
 	})
 
+	mux.HandleFunc("GET /api/v1/alerts", func(w http.ResponseWriter, r *http.Request) {
+		alerts, err := pg.ListAlerts(r.Context(), parseLimit(r, 50))
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"count": len(alerts), "alerts": alerts})
+	})
+
 	if err := httpx.Run(ctx, cfg.HTTPAddr, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("server error", "err", err)
 		os.Exit(1)
 	}
 	slog.Info("api shut down cleanly")
+}
+
+func parseLimit(r *http.Request, def int) int {
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
+			return n
+		}
+	}
+	return def
 }

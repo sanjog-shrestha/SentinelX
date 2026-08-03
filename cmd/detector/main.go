@@ -12,6 +12,7 @@ import (
 
 	"sentinelx/internal/bus"
 	"sentinelx/internal/config"
+	"sentinelx/internal/detect"
 	"sentinelx/internal/event"
 	"sentinelx/internal/httpx"
 	"sentinelx/internal/store"
@@ -49,6 +50,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	engine := detect.New(detect.DefaultRules())
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				engine.Sweep(time.Now().UTC())
+			}
+		}
+	}()
+
 	stream, err := js.Stream(ctx, bus.StreamEvents)
 	if err != nil {
 		slog.Error("stream lookup failed", "err", err)
@@ -70,7 +86,7 @@ func main() {
 		hctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		err := process(hctx, pg, msg.Data())
+		err := process(hctx, pg, js, engine, msg.Data())
 		if err == nil {
 			_ = msg.Ack()
 			return
@@ -99,7 +115,7 @@ func main() {
 	defer cc.Stop()
 
 	bus.StartHeartbeat(ctx, nc, cfg.ServiceName, 10*time.Second)
-	slog.Info("detector consuming", "subject", bus.SubjectEventsRaw)
+	slog.Info("detector consuming", "subject", bus.SubjectEventsRaw, "rules", len(detect.DefaultRules()))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", httpx.HealthzHandler(cfg.ServiceName))
@@ -113,13 +129,20 @@ func main() {
 		}},
 	))
 
+	mux.HandleFunc("GET /detector/v1/state", func(w http.ResponseWriter, r *http.Request) {
+		httpx.WriteJSON(w, http.StatusOK, engine.Stats())
+	})
+
 	if err := httpx.Run(ctx, cfg.HTTPAddr, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("server error", "err", err)
 		os.Exit(1)
 	}
+	slog.Info("detector shut down cleanly")
 }
 
-func process(ctx context.Context, pg *store.Postgres, data []byte) error {
+func process(ctx context.Context, pg *store.Postgres, js jetstream.JetStream,
+	engine *detect.Detector, data []byte) error {
+
 	var ev event.Event
 	if err := json.Unmarshal(data, &ev); err != nil {
 		return fmt.Errorf("unmarshal: %w", err)
@@ -127,6 +150,7 @@ func process(ctx context.Context, pg *store.Postgres, data []byte) error {
 	if ev.EventID == "" {
 		return errors.New("event missing event_id")
 	}
+
 	inserted, err := pg.InsertEvent(ctx, &ev)
 	if err != nil {
 		return fmt.Errorf("insert: %w", err)
@@ -135,6 +159,31 @@ func process(ctx context.Context, pg *store.Postgres, data []byte) error {
 		slog.Info("duplicate delivery ignored", "event_id", ev.EventID)
 		return nil
 	}
-	slog.Info("event stored", "event_id", ev.EventID, "severity", ev.Severity)
+
+	for _, alert := range engine.Eval(&ev, time.Now().UTC()) {
+		stored, err := pg.InsertAlert(ctx, &alert)
+		if err != nil {
+			return fmt.Errorf("insert alert: %w", err)
+		}
+		if !stored {
+			continue
+		}
+
+		slog.Warn("ALERT",
+			"rule", alert.RuleID,
+			"entity", alert.Entity,
+			"count", alert.Count,
+			"severity", alert.Severity)
+
+		payload, marshalErr := json.Marshal(alert)
+		if marshalErr != nil {
+			slog.Warn("alert marshal failed", "err", marshalErr)
+			continue
+		}
+		if _, err := js.Publish(ctx, bus.SubjectAlerts, payload,
+			jetstream.WithMsgID(alert.AlertID)); err != nil {
+			slog.Warn("alert publish failed", "err", err)
+		}
+	}
 	return nil
 }
