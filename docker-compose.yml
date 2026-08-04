@@ -165,6 +165,31 @@ services:
       - suricata_logs:/var/log/suricata
     depends_on: [victim]
 
+  asset-manager:
+    build:
+      context: .
+      dockerfile: build/Dockerfile
+      args:
+        SERVICE: asset-manager
+        RUNTIME_PKGS: nmap # only this image gets nmap
+    environment:
+      HTTP_ADDR: ":8084"
+      POSTGRES_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      NATS_URL: nats://nats:4222
+      SCAN_TARGETS: 172.28.0.0/24
+      SCAN_INTERVAL: 5m
+      SCAN_TIMEOUT: 4m
+    ports:
+      - "8084:8084"
+    depends_on:
+      postgres: { condition: service_healthy }
+      nats: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8084/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   zeek:
     image: zeek/zeek:7.0
     network_mode: "service:victim"
@@ -181,3 +206,9 @@ volumes:
   nats_data:
   suricata_logs:
   zeek_logs:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

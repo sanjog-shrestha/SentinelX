@@ -143,6 +143,24 @@ func main() {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"count": len(alerts), "alerts": alerts})
 	})
 
+	mux.HandleFunc("GET /api/v1/assets", func(w http.ResponseWriter, r *http.Request) {
+		assets, err := pg.ListAssets(r.Context(), parseLimit(r, 200))
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"count": len(assets), "assets": assets})
+	})
+
+	mux.HandleFunc("GET /api/v1/assets/changes", func(w http.ResponseWriter, r *http.Request) {
+		changes, err := pg.ListChanges(r.Context(), parseLimit(r, 50))
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"count": len(changes), "changes": changes})
+	})
+
 	if err := httpx.Run(ctx, cfg.HTTPAddr, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("server error", "err", err)
 		os.Exit(1)

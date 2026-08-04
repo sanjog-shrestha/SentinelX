@@ -62,5 +62,20 @@ func DefaultRules() []*Rule {
 			KeyBy:       srcIP,
 			ValueOf:     func(ev *event.Event) string { return ev.Message },
 		},
+		{
+			ID:          "asset-new-host",
+			Title:       "New host discovered on the network",
+			Severity:    "high",
+			Description: "A host not previously in the inventory was found",
+			Window:      2 * time.Minute,
+			Threshold:   1,
+			Cooldown:    time.Hour,
+			MaxKeys:     5000,
+			Match: func(ev *event.Event) bool {
+				return ev.Category == "asset" && ev.Severity == "high"
+			},
+			KeyBy:   srcIP,
+			ValueOf: func(ev *event.Event) string { return ev.Message },
+		},
 	}
 }

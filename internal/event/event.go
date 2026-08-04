@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"strconv"
 	"time"
 )
 
@@ -35,3 +36,5 @@ func DeterministicID(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:16])
 }
+
+func Itoa(i int) string { return strconv.Itoa(i) }
