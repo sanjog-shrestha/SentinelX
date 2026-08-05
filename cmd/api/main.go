@@ -161,6 +161,28 @@ func main() {
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"count": len(changes), "changes": changes})
 	})
 
+	mux.HandleFunc("GET /api/v1/incidents", func(w http.ResponseWriter, r *http.Request) {
+		incidents, err := pg.ListIncidents(r.Context(), parseLimit(r, 50))
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"count": len(incidents), "incidents": incidents})
+	})
+
+	mux.HandleFunc("GET /api/v1/incidents/{id}", func(w http.ResponseWriter, r *http.Request) {
+		inc, err := pg.GetIncident(r.Context(), r.PathValue("id"))
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if inc == nil {
+			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "incident not found"})
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, inc)
+	})
+
 	if err := httpx.Run(ctx, cfg.HTTPAddr, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("server error", "err", err)
 		os.Exit(1)

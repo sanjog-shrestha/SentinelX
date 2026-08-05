@@ -93,3 +93,8 @@ func (d *Detector) Stats() map[string]any {
 }
 
 func itoa(i int) string { return strconv.Itoa(i) }
+
+func NewAlertID(seed string, at time.Time) string {
+	sum := sha256.Sum256([]byte(seed + "|" + at.Format(time.RFC3339Nano)))
+	return hex.EncodeToString(sum[:16])
+}

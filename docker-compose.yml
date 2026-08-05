@@ -147,12 +147,18 @@ services:
 
   attacker:
     image: alpine:3.20
+    restart: unless-stopped
     depends_on: [victim]
     command: >
       sh -c "apk add --no-cache nmap >/dev/null 2>&1;
         while true; do
           sleep 90;
           nmap -Pn -T4 -p 1-120 victim >/dev/null 2>&1;
+          sleep 5;
+          i=0; while [ $$i -lt 12 ]; do
+            wget -qO- --header='User-Agent: sqlmap/1.7' http://victim/admin >/dev/null 2>&1;
+            i=$$((i+1));
+          done;
         done"
 
   suricata:
@@ -199,6 +205,27 @@ services:
     volumes:
       - zeek_logs:/logs
     depends_on: [victim]
+
+  correlator:
+    build:
+      context: .
+      dockerfile: build/Dockerfile
+      args: { SERVICE: correlator }
+    environment:
+      HTTP_ADDR: ":8085"
+      POSTGRES_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      NATS_URL: nats://nats:4222
+      INCIDENT_IDLE_TIMEOUT: 15m
+    ports:
+      - "8085:8085"
+    depends_on:
+      postgres: { condition: service_healthy }
+      nats: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8085/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
   postgres_data:

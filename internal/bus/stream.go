@@ -13,6 +13,7 @@ const (
 	SubjectEventsRaw = "sentinelx.events.raw"
 	SubjectEventsDLQ = "sentinelx.events.dlq"
 	SubjectAlerts    = "sentinelx.alerts.detected"
+	SubjectIncidents = "sentinelx.incidents.updated"
 )
 
 func NewJetStream(ctx context.Context, nc *nats.Conn) (jetstream.JetStream, error) {
@@ -22,7 +23,7 @@ func NewJetStream(ctx context.Context, nc *nats.Conn) (jetstream.JetStream, erro
 	}
 	_, err = js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
 		Name:     StreamEvents,
-		Subjects: []string{"sentinelx.events.>", "sentinelx.alerts.>"},
+		Subjects: []string{"sentinelx.events.>", "sentinelx.alerts.>", "sentinelx.incidents.>"},
 		Storage:  jetstream.FileStorage,
 		MaxAge:   24 * time.Hour,
 	})
