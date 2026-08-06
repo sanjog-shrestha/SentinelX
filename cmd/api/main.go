@@ -171,7 +171,8 @@ func main() {
 	})
 
 	mux.HandleFunc("GET /api/v1/incidents/{id}", func(w http.ResponseWriter, r *http.Request) {
-		inc, err := pg.GetIncident(r.Context(), r.PathValue("id"))
+		id := r.PathValue("id")
+		inc, err := pg.GetIncident(r.Context(), id)
 		if err != nil {
 			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -180,7 +181,15 @@ func main() {
 			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "incident not found"})
 			return
 		}
-		httpx.WriteJSON(w, http.StatusOK, inc)
+		report, err := pg.GetReport(r.Context(), id)
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{
+			"incident":  inc,
+			"ai_report": report, // null until the AI has analyzed it
+		})
 	})
 
 	if err := httpx.Run(ctx, cfg.HTTPAddr, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {

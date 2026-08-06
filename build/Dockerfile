@@ -1,18 +1,13 @@
-# ── Stage 1: build ─────────────────────────────────────────────
+# ── Stage 1: build every service in one pass ───────────────────
 FROM golang:1.24-alpine AS build
-ARG SERVICE
-WORKDIR /src 
-
-COPY go.mod ./
+WORKDIR /src
 COPY . .
-
-RUN go mod tidy && CGO_ENABLED=0 go build -o /out/app ./cmd/${SERVICE}
+RUN go mod tidy && CGO_ENABLED=0 go build -o /out/ ./cmd/...
 
 # ── Stage 2: runtime ───────────────────────────────────────────
 FROM alpine:3.20
 ARG RUNTIME_PKGS=""
 RUN if [ -n "$RUNTIME_PKGS" ]; then apk add --no-cache $RUNTIME_PKGS; fi
 RUN adduser -D -u 10001 appuser
-COPY --from=build /out/app /usr/local/bin/app
+COPY --from=build /out/ /usr/local/bin/
 USER appuser
-ENTRYPOINT ["/usr/local/bin/app"]

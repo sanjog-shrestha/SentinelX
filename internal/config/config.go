@@ -3,6 +3,7 @@ package config
 import (
 	"cmp"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -20,6 +21,12 @@ type Config struct {
 	ScanInterval        time.Duration
 	ScanTimeout         time.Duration
 	IncidentIdleTimeout time.Duration
+	AIEnabled           bool
+	OllamaURL           string
+	OllamaModel         string
+	AIMinScore          int
+	AICooldown          time.Duration
+	AITimeout           time.Duration
 }
 
 func Load(serviceName, defaultHTTPAddr string) Config {
@@ -37,6 +44,12 @@ func Load(serviceName, defaultHTTPAddr string) Config {
 		ScanInterval:        envDuration("SCAN_INTERVAL", 5*time.Minute),
 		ScanTimeout:         envDuration("SCAN_TIMEOUT", 4*time.Minute),
 		IncidentIdleTimeout: envDuration("INCIDENT_IDLE_TIMEOUT", 15*time.Minute),
+		AIEnabled:           env("AI_ENABLED", "true") == "true",
+		OllamaURL:           env("OLLAMA_URL", "http://ollama:11434"),
+		OllamaModel:         env("OLLAMA_MODEL", "llama3.2:1b"),
+		AIMinScore:          envInt("AI_MIN_SCORE", 20),
+		AICooldown:          envDuration("AI_COOLDOWN", 5*time.Minute),
+		AITimeout:           envDuration("AI_TIMEOUT", 120*time.Second),
 	}
 }
 
@@ -48,6 +61,15 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 	if v := os.Getenv(key); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			return d
+		}
+	}
+	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
 		}
 	}
 	return fallback

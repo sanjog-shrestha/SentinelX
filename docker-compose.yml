@@ -46,10 +46,8 @@ services:
       retries: 10
 
   api:
-    build:
-      context: .
-      dockerfile: build/Dockerfile
-      args: { SERVICE: api }
+    build: { context: ., dockerfile: build/Dockerfile }
+    command: ["api"]
     environment:
       HTTP_ADDR: ":8080"
       POSTGRES_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
@@ -68,10 +66,8 @@ services:
       retries: 5
 
   collector:
-    build:
-      context: .
-      dockerfile: build/Dockerfile
-      args: { SERVICE: collector }
+    build: { context: ., dockerfile: build/Dockerfile }
+    command: ["collector"]
     environment:
       HTTP_ADDR: ":8082"
       NATS_URL: nats://nats:4222
@@ -92,10 +88,8 @@ services:
       retries: 5
 
   dashboard-api:
-    build:
-      context: .
-      dockerfile: build/Dockerfile
-      args: { SERVICE: dashboard-api }
+    build: { context: ., dockerfile: build/Dockerfile }
+    command: ["dashboard-api"]
     environment:
       HTTP_ADDR: ":8081"
       NATS_URL: nats://nats:4222
@@ -111,10 +105,8 @@ services:
       retries: 5
 
   detector:
-    build:
-      context: .
-      dockerfile: build/Dockerfile
-      args: { SERVICE: detector }
+    build: { context: ., dockerfile: build/Dockerfile }
+    command: ["detector"]
     environment:
       HTTP_ADDR: ":8083"
       POSTGRES_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
@@ -175,9 +167,8 @@ services:
     build:
       context: .
       dockerfile: build/Dockerfile
-      args:
-        SERVICE: asset-manager
-        RUNTIME_PKGS: nmap # only this image gets nmap
+      args: { RUNTIME_PKGS: nmap }
+    command: ["asset-manager"]
     environment:
       HTTP_ADDR: ":8084"
       POSTGRES_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
@@ -207,10 +198,8 @@ services:
     depends_on: [victim]
 
   correlator:
-    build:
-      context: .
-      dockerfile: build/Dockerfile
-      args: { SERVICE: correlator }
+    build: { context: ., dockerfile: build/Dockerfile }
+    command: ["correlator"]
     environment:
       HTTP_ADDR: ":8085"
       POSTGRES_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
@@ -226,6 +215,42 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  ai-engine:
+    build: { context: ., dockerfile: build/Dockerfile }
+    command: ["ai-engine"]
+    environment:
+      HTTP_ADDR: ":8086"
+      POSTGRES_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      NATS_URL: nats://nats:4222
+      AI_ENABLED: "true"
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: llama3.2:1b
+      AI_MIN_SCORE: "20"
+      AI_COOLDOWN: 5m
+      AI_TIMEOUT: 120s
+    ports:
+      - "8086:8086"
+    depends_on:
+      postgres: { condition: service_healthy }
+      nats: { condition: service_healthy }
+      ollama: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8086/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
 volumes:
   postgres_data:
@@ -233,6 +258,7 @@ volumes:
   nats_data:
   suricata_logs:
   zeek_logs:
+  ollama_data:
 
 networks:
   default:
