@@ -192,6 +192,15 @@ func main() {
 		})
 	})
 
+	mux.HandleFunc("GET /api/v1/intel/stats", func(w http.ResponseWriter, r *http.Request) {
+		stats, err := pg.IndicatorStats(r.Context())
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, stats)
+	})
+
 	if err := httpx.Run(ctx, cfg.HTTPAddr, mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("server error", "err", err)
 		os.Exit(1)

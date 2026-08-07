@@ -77,5 +77,22 @@ func DefaultRules() []*Rule {
 			KeyBy:   srcIP,
 			ValueOf: func(ev *event.Event) string { return ev.Message },
 		},
+		// 6. KNOWN-BAD SOURCE — threshold 1: any contact from a listed
+		// indicator is worth an alert, regardless of volume.
+		{
+			ID:          "intel-known-bad",
+			Title:       "Traffic from known-bad source",
+			Severity:    "critical",
+			Description: "Source IP matched a threat intelligence indicator",
+			Window:      5 * time.Minute,
+			Threshold:   1,
+			Cooldown:    30 * time.Minute,
+			MaxKeys:     5000,
+			Match:       func(ev *event.Event) bool { return ev.IntelMatch },
+			KeyBy:       srcIP,
+			ValueOf: func(ev *event.Event) string {
+				return ev.IntelSource + ":" + ev.IntelCategory
+			},
+		},
 	}
 }

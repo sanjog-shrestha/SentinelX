@@ -24,6 +24,11 @@ type Event struct {
 	DstIP   string `json:"dst_ip,omitempty"`
 	DstPort int    `json:"dst_port,omitempty"`
 	Proto   string `json:"proto,omitempty"`
+
+	IntelMatch      bool   `json:"intel_match,omitempty"`
+	IntelSource     string `json:"intel_source,omitempty"`
+	IntelCategory   string `json:"intel_category,omitempty"`
+	IntelConfidence int    `json:"intel_confidence,omitempty"`
 }
 
 func NewID() string {

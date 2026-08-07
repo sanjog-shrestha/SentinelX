@@ -9,17 +9,18 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/nats-io/nats.go/jetstream"
 
 	"sentinelx/internal/bus"
 	"sentinelx/internal/config"
 	"sentinelx/internal/detect"
 	"sentinelx/internal/event"
 	"sentinelx/internal/httpx"
+	"sentinelx/internal/intel"
 	"sentinelx/internal/store"
-	"syscall"
-	"time"
-
-	"github.com/nats-io/nats.go/jetstream"
 )
 
 const maxDeliver = 5
@@ -30,12 +31,17 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// ── Dependencies ────────────────────────────────────────────
 	pg, err := store.NewPostgres(ctx, cfg.PostgresURL)
 	if err != nil {
 		slog.Error("postgres init failed", "err", err)
 		os.Exit(1)
 	}
 	defer pg.Pool.Close()
+
+	// NEW in Phase 8: the detector needs Redis for threat-intel lookups.
+	rdb := store.NewRedis(cfg.RedisAddr)
+	defer rdb.Client.Close()
 
 	nc, err := bus.Connect(cfg.NATSURL, cfg.ServiceName)
 	if err != nil {
@@ -50,6 +56,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	// NEW: intel lookup. Exact IPs hit Redis; CIDR prefixes are cached
+	// in-process and refreshed every minute.
+	lookup := intel.NewLookup(rdb.Client)
+	lookup.StartRefresh(ctx, time.Minute)
+
+	// ── Rule engine ─────────────────────────────────────────────
 	engine := detect.New(detect.DefaultRules())
 
 	go func() {
@@ -65,6 +77,7 @@ func main() {
 		}
 	}()
 
+	// ── Durable consumer ────────────────────────────────────────
 	stream, err := js.Stream(ctx, bus.StreamEvents)
 	if err != nil {
 		slog.Error("stream lookup failed", "err", err)
@@ -86,7 +99,7 @@ func main() {
 		hctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		err := process(hctx, pg, js, engine, msg.Data())
+		err := process(hctx, pg, js, engine, lookup, msg.Data())
 		if err == nil {
 			_ = msg.Ack()
 			return
@@ -117,10 +130,12 @@ func main() {
 	bus.StartHeartbeat(ctx, nc, cfg.ServiceName, 10*time.Second)
 	slog.Info("detector consuming", "subject", bus.SubjectEventsRaw, "rules", len(detect.DefaultRules()))
 
+	// ── HTTP ────────────────────────────────────────────────────
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", httpx.HealthzHandler(cfg.ServiceName))
 	mux.HandleFunc("GET /readyz", httpx.ReadyzHandler(
 		httpx.Check{Name: "postgres", Probe: pg.Ping},
+		httpx.Check{Name: "redis", Probe: rdb.Ping},
 		httpx.Check{Name: "nats", Probe: func(context.Context) error {
 			if !nc.IsConnected() {
 				return errors.New("not connected")
@@ -128,7 +143,6 @@ func main() {
 			return nil
 		}},
 	))
-
 	mux.HandleFunc("GET /detector/v1/state", func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, engine.Stats())
 	})
@@ -140,8 +154,9 @@ func main() {
 	slog.Info("detector shut down cleanly")
 }
 
+// process: enrich → store → detect. The ORDER matters.
 func process(ctx context.Context, pg *store.Postgres, js jetstream.JetStream,
-	engine *detect.Detector, data []byte) error {
+	engine *detect.Detector, lookup *intel.Lookup, data []byte) error {
 
 	var ev event.Event
 	if err := json.Unmarshal(data, &ev); err != nil {
@@ -149,6 +164,22 @@ func process(ctx context.Context, pg *store.Postgres, js jetstream.JetStream,
 	}
 	if ev.EventID == "" {
 		return errors.New("event missing event_id")
+	}
+
+	// ── NEW: threat-intel enrichment, BEFORE storage ────────────
+	// Storing the verdict alongside the event preserves what we knew at
+	// decision time. Enriching at read time instead would mean a historical
+	// event's verdict silently changes as feeds update.
+	if m := lookup.Check(ctx, ev.SrcIP); m.Matched {
+		ev.IntelMatch = true
+		ev.IntelSource = m.Source
+		ev.IntelCategory = m.Category
+		ev.IntelConfidence = m.Confidence
+
+		// A listed source makes benign-looking traffic worth a second look.
+		if ev.Severity == "info" || ev.Severity == "low" {
+			ev.Severity = "medium"
+		}
 	}
 
 	inserted, err := pg.InsertEvent(ctx, &ev)

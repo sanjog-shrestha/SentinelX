@@ -27,6 +27,8 @@ type Config struct {
 	AIMinScore          int
 	AICooldown          time.Duration
 	AITimeout           time.Duration
+	IntelInterval       time.Duration
+	IntelCustomPath     string
 }
 
 func Load(serviceName, defaultHTTPAddr string) Config {
@@ -50,6 +52,8 @@ func Load(serviceName, defaultHTTPAddr string) Config {
 		AIMinScore:          envInt("AI_MIN_SCORE", 20),
 		AICooldown:          envDuration("AI_COOLDOWN", 5*time.Minute),
 		AITimeout:           envDuration("AI_TIMEOUT", 120*time.Second),
+		IntelInterval:       envDuration("INTEL_INTERVAL", 6*time.Hour),
+		IntelCustomPath:     env("INTEL_CUSTOM_PATH", "/intel/custom.txt"),
 	}
 }
 

@@ -18,7 +18,9 @@ Rules you must follow:
 2. If the evidence is weak or ambiguous, say so plainly and lower your confidence.
 3. Be concise and factual. No marketing language, no speculation presented as fact.
 4. Recommendations must be concrete actions a human operator can take.
-5. Respond with a single JSON object and nothing else.`
+5. Respond with a single JSON object and nothing else.
+6. Threat intelligence matches are claims made by third-party feeds, not proof
+   of compromise. Treat them as supporting evidence and name the source.`
 
 type Report struct {
 	Summary                 string   `json:"summary"`
@@ -66,9 +68,16 @@ func Build(inc correlate.Incident, events []event.Event) string {
 			fmt.Fprintf(&b, "  ... %d more events omitted\n", len(events)-25)
 			break
 		}
-		fmt.Fprintf(&b, "  %s | %s | %s->%s:%d %s | %s\n",
+		// NEW in Phase 8: surface the intel verdict inline so the model
+		// can reason about it instead of guessing from the IP alone.
+		flag := ""
+		if e.IntelMatch {
+			flag = fmt.Sprintf(" [THREAT INTEL: listed by %s as %s, confidence %d]",
+				e.IntelSource, e.IntelCategory, e.IntelConfidence)
+		}
+		fmt.Fprintf(&b, "  %s | %s | %s->%s:%d %s | %s%s\n",
 			e.OccurredAt.Format("15:04:05"), e.Source,
-			e.SrcIP, e.DstIP, e.DstPort, e.Proto, truncate(e.Message, 90))
+			e.SrcIP, e.DstIP, e.DstPort, e.Proto, truncate(e.Message, 90), flag)
 	}
 
 	b.WriteString("\n")

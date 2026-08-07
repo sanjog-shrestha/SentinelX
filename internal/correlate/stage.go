@@ -22,6 +22,7 @@ var ruleStage = map[string]string{
 	"web-attack-burst":    StageExploit,
 	"high-severity-burst": StageExploit,
 	"auth-brute-force":    StageCredential,
+	"intel-known-bad":     StageExploit,
 }
 
 func StageOf(ruleID string) string {
