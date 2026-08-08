@@ -1,0 +1,68 @@
+# ─────────────────────────────────────────────────────────────
+# falco/sentinelx_rules.yaml
+# Mounted to /etc/falco/falco_rules.local.yaml
+# ─────────────────────────────────────────────────────────────
+
+# ── Tuning: silence defaults that are pure noise in this lab ──
+# busybox ping legitimately dup2's a socket every 5 seconds, and nmap
+# legitimately opens packet sockets. Tuning out known-good behaviour is
+# most of the work in runtime security.
+- rule: Redirect STDOUT/STDIN to Network Connection in Container
+  enabled: false
+  override:
+    enabled: replace
+
+- rule: Packet socket created in container
+  enabled: false
+  override:
+    enabled: replace
+
+# ── Detections ───────────────────────────────────────────────
+
+- rule: SentinelX Shell In Container
+  desc: A shell was spawned inside a running container
+  condition: >
+    spawned_process and container
+    and proc.name in (bash, sh, ash, zsh, dash)
+  output: >
+    Shell spawned in container
+    (user=%user.name container=%container.name image=%container.image.repository
+     proc=%proc.name parent=%proc.pname cmdline=%proc.cmdline)
+  priority: WARNING
+  tags: [container, shell, mitre_execution]
+
+- rule: SentinelX Sensitive File Read In Container
+  desc: A process read a credential-bearing file
+  condition: >
+    open_read and container
+    and fd.name in (/etc/shadow, /etc/passwd, /root/.ssh/id_rsa, /etc/sudoers)
+  output: >
+    Sensitive file opened in container
+    (user=%user.name container=%container.name file=%fd.name proc=%proc.name)
+  priority: WARNING
+  tags: [container, filesystem, mitre_credential_access]
+
+- rule: SentinelX Package Manager In Container
+  desc: Package manager ran inside a container — often post-exploitation tooling
+  condition: >
+    spawned_process and container
+    and proc.name in (apk, apt, apt-get, yum, dnf, pip, pip3)
+  output: >
+    Package manager launched in container
+    (user=%user.name container=%container.name proc=%proc.name cmdline=%proc.cmdline)
+  priority: NOTICE
+  tags: [container, software_mgmt]
+
+- rule: SentinelX Network Tool In Container
+  desc: Reconnaissance or tunneling tooling executed inside a container
+  condition: >
+    spawned_process and container
+    and proc.name in (nc, ncat, netcat, nmap, socat, tcpdump, curl, wget)
+    and not container.name contains "traffic-gen"
+    and not container.name contains "attacker"
+    and not container.name contains "asset-manager"
+  output: >
+    Network tool executed in container
+    (user=%user.name container=%container.name proc=%proc.name cmdline=%proc.cmdline)
+  priority: WARNING
+  tags: [container, network, mitre_discovery]

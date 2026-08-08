@@ -29,6 +29,7 @@ type Config struct {
 	AITimeout           time.Duration
 	IntelInterval       time.Duration
 	IntelCustomPath     string
+	FalcoLog            string
 }
 
 func Load(serviceName, defaultHTTPAddr string) Config {
@@ -54,6 +55,7 @@ func Load(serviceName, defaultHTTPAddr string) Config {
 		AITimeout:           envDuration("AI_TIMEOUT", 120*time.Second),
 		IntelInterval:       envDuration("INTEL_INTERVAL", 6*time.Hour),
 		IntelCustomPath:     env("INTEL_CUSTOM_PATH", "/intel/custom.txt"),
+		FalcoLog:            env("FALCO_LOG", ""),
 	}
 }
 

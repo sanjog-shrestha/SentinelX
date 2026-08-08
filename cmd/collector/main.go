@@ -112,6 +112,26 @@ func main() {
 		}()
 	}
 
+	// ── Source 4: Falco runtime alerts ──────────────────────────
+	// Identical shape to the other two sources — that's the payoff of the
+	// tail → normalize → publish pattern.
+	if cfg.FalcoLog != "" {
+		lines := make(chan string, 256)
+		go tail.Follow(ctx, cfg.FalcoLog, lines)
+		go func() {
+			for line := range lines {
+				ev, err := normalize.Falco([]byte(line))
+				if err != nil {
+					slog.Warn("falco parse failed", "err", err)
+					continue
+				}
+				if ev != nil {
+					publish(ev)
+				}
+			}
+		}()
+	}
+
 	if cfg.Simulate {
 		go func() {
 			ticker := time.NewTicker(2 * time.Second)

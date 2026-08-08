@@ -15,10 +15,12 @@ import (
 func (p *Postgres) EventsForEntity(ctx context.Context, entity string, since time.Time, limit int) ([]event.Event, error) {
 	rows, err := p.Pool.Query(ctx,
 		`SELECT id, event_id, source, category, severity, message,
-		        occurred_at, created_at, src_ip, src_port, dst_ip, dst_port, proto,
-		        intel_match, intel_source, intel_category, intel_confidence
+		        occurred_at, created_at,
+		        src_ip, src_port, dst_ip, dst_port, proto,
+		        intel_match, intel_source, intel_category, intel_confidence,
+		        container, process, os_user
 		 FROM events
-		 WHERE src_ip = $1 AND occurred_at >= $2
+		 WHERE (src_ip = $1 OR dst_ip = $1) AND occurred_at >= $2
 		 ORDER BY occurred_at DESC LIMIT $3`,
 		entity, since, limit)
 	if err != nil {
@@ -29,10 +31,12 @@ func (p *Postgres) EventsForEntity(ctx context.Context, entity string, since tim
 	out := []event.Event{}
 	for rows.Next() {
 		var e event.Event
-		if err := rows.Scan(&e.DBID, &e.EventID, &e.Source, &e.Category, &e.Severity,
-			&e.Message, &e.OccurredAt, &e.CreatedAt, &e.SrcIP, &e.SrcPort,
-			&e.DstIP, &e.DstPort, &e.Proto,
-			&e.IntelMatch, &e.IntelSource, &e.IntelCategory, &e.IntelConfidence); err != nil {
+		if err := rows.Scan(
+			&e.DBID, &e.EventID, &e.Source, &e.Category, &e.Severity, &e.Message,
+			&e.OccurredAt, &e.CreatedAt,
+			&e.SrcIP, &e.SrcPort, &e.DstIP, &e.DstPort, &e.Proto,
+			&e.IntelMatch, &e.IntelSource, &e.IntelCategory, &e.IntelConfidence,
+			&e.Container, &e.Process, &e.OSUser); err != nil {
 			return nil, err
 		}
 		out = append(out, e)

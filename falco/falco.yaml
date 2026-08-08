@@ -1,0 +1,10 @@
+json_output: true
+json_include_output_property: true
+
+file_output:
+  enabled: true
+  keep_alive: false
+  filename: /var/log/falco/events.json
+
+stdout_output:
+  enabled: true

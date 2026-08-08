@@ -1,8 +1,8 @@
 CREATE TABLE IF NOT EXISTS indicators (
     id         BIGSERIAL PRIMARY KEY,
-    indicator  TEXT        NOT NULL,           -- "1.2.3.4" or "1.2.3.0/24"
-    kind       TEXT        NOT NULL,           -- ip | cidr
-    source     TEXT        NOT NULL,           -- which feed said so
+    indicator  TEXT        NOT NULL,
+    kind       TEXT        NOT NULL,
+    source     TEXT        NOT NULL,
     category   TEXT        NOT NULL DEFAULT 'unknown',
     confidence INT         NOT NULL DEFAULT 50,
     first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -12,9 +12,8 @@ CREATE TABLE IF NOT EXISTS indicators (
 );
 
 CREATE INDEX IF NOT EXISTS idx_indicators_active
-    ON indicators (indicator) WHERE expires_at > now();
+    ON indicators (indicator, expires_at);
 
--- Enrichment recorded on the event itself, at the moment we decided.
 ALTER TABLE events
     ADD COLUMN IF NOT EXISTS intel_match      BOOLEAN NOT NULL DEFAULT false,
     ADD COLUMN IF NOT EXISTS intel_source     TEXT    NOT NULL DEFAULT '',

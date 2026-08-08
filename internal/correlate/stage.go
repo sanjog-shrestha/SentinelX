@@ -21,8 +21,10 @@ var ruleStage = map[string]string{
 	"asset-new-host":      StageRecon,
 	"web-attack-burst":    StageExploit,
 	"high-severity-burst": StageExploit,
-	"auth-brute-force":    StageCredential,
 	"intel-known-bad":     StageExploit,
+	"auth-brute-force":    StageCredential,
+	"runtime-shell":       StageImpact, // NEW — attacker is INSIDE
+	"runtime-burst":       StageImpact, // NEW
 }
 
 func StageOf(ruleID string) string {

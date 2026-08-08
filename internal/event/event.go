@@ -29,6 +29,10 @@ type Event struct {
 	IntelSource     string `json:"intel_source,omitempty"`
 	IntelCategory   string `json:"intel_category,omitempty"`
 	IntelConfidence int    `json:"intel_confidence,omitempty"`
+
+	Container string `json:"container,omitempty"`
+	Process   string `json:"process,omitempty"`
+	OSUser    string `json:"os_user,omitempty"`
 }
 
 func NewID() string {

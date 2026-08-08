@@ -74,9 +74,11 @@ services:
       SURICATA_EVE: /var/log/suricata/eve.json
       ZEEK_DIR: /zeek
       SIMULATE: "false"
+      FALCO_LOG: /var/log/falco/events.json
     volumes:
       - suricata_logs:/var/log/suricata:ro
       - zeek_logs:/zeek:ro
+      - falco_logs:/var/log/falco:ro
     ports:
       - "8082:8082"
     depends_on:
@@ -278,6 +280,30 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+  falco:
+    image: falcosecurity/falco:0.40.0 # 0.38.2's driver fails on kernel 6.8
+    restart: unless-stopped
+    privileged: true
+    pid: host
+    ulimits:
+      memlock: -1
+    command:
+      - falco
+      - -o
+      - engine.kind=modern_ebpf
+      # NOTE the key is modern_ebpf, not modern_bpf — that's why the earlier
+      # buffer flags were silently ignored.
+      - -o
+      - engine.modern_ebpf.cpus_for_each_buffer=0
+      - -o
+      - engine.modern_ebpf.buf_size_preset=1
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - /sys/fs/bpf:/sys/fs/bpf
+      - ./falco/falco.yaml:/etc/falco/falco.yaml:ro # ← MISSING
+      - ./falco/sentinelx_rules.yaml:/etc/falco/falco_rules.local.yaml:ro
+      - falco_logs:/var/log/falco
 
 volumes:
   postgres_data:
@@ -286,6 +312,7 @@ volumes:
   suricata_logs:
   zeek_logs:
   ollama_data:
+  falco_logs:
 
 networks:
   default:

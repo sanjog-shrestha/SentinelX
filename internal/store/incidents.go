@@ -12,8 +12,61 @@ import (
 	"sentinelx/internal/detect"
 )
 
+// FindIncidentTargeting locates an open incident whose entity has recently
+// sent traffic TO the given IP.
+//
+// This is what joins the two identity spaces. A runtime alert is keyed by
+// container, but the attacker is an IP — so we ask: "who has been attacking
+// this host lately?" and attach the alert to their story. Ordering by score
+// picks the most significant attacker when several are in play.
+//
+// This is a HEURISTIC, not proof of causation. See the Phase 9 caveats.
+func (p *Postgres) FindIncidentTargeting(ctx context.Context, targetIP string, since time.Time) (string, error) {
+	if targetIP == "" {
+		return "", nil
+	}
+	var incidentID string
+	err := p.Pool.QueryRow(ctx,
+		`SELECT i.incident_id
+		 FROM incidents i
+		 WHERE i.status = 'open'
+		   AND i.last_seen >= $2
+		   AND EXISTS (
+		       SELECT 1 FROM events e
+		       WHERE e.src_ip = i.entity
+		         AND e.dst_ip = $1
+		         AND e.occurred_at >= $2
+		   )
+		 ORDER BY i.score DESC, i.last_seen DESC
+		 LIMIT 1`,
+		targetIP, since,
+	).Scan(&incidentID)
+
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return incidentID, err
+}
+
+// AttachAlert finds or creates an incident, appends the alert, and recomputes
+// the score — all in ONE transaction, because it does read-then-write.
+//
+// Returns (incident, isNew, isDuplicate, error).
 func (p *Postgres) AttachAlert(ctx context.Context, a detect.Alert, idle time.Duration) (
 	*correlate.Incident, bool, bool, error) {
+
+	cutoff := a.CreatedAt.Add(-idle)
+
+	// Resolve the link BEFORE opening the transaction — it's a read-only
+	// query and holding a lock across it would serialize the whole pipeline.
+	preferredID := ""
+	if a.Link != "" {
+		var err error
+		preferredID, err = p.FindIncidentTargeting(ctx, a.Link, cutoff)
+		if err != nil {
+			return nil, false, false, err
+		}
+	}
 
 	tx, err := p.Pool.Begin(ctx)
 	if err != nil {
@@ -21,20 +74,33 @@ func (p *Postgres) AttachAlert(ctx context.Context, a detect.Alert, idle time.Du
 	}
 	defer tx.Rollback(ctx)
 
-	cutoff := a.CreatedAt.Add(-idle)
-
 	var inc correlate.Incident
 	var stagesRaw []byte
-	err = tx.QueryRow(ctx,
-		`SELECT incident_id, entity, title, status, severity, score, stages,
-		        alert_count, first_seen, last_seen
-		 FROM incidents
-		 WHERE entity = $1 AND status = 'open' AND last_seen >= $2
-		 ORDER BY id DESC LIMIT 1
-		 FOR UPDATE`,
-		a.Entity, cutoff,
-	).Scan(&inc.IncidentID, &inc.Entity, &inc.Title, &inc.Status, &inc.Severity,
-		&inc.Score, &stagesRaw, &inc.AlertCount, &inc.FirstSeen, &inc.LastSeen)
+
+	// FOR UPDATE takes a row lock. A concurrent transaction asking the same
+	// question BLOCKS here until we commit — which is what prevents two
+	// correlators from creating duplicate incidents for one entity.
+	if preferredID != "" {
+		// Linked path: join the attacker's existing incident.
+		err = tx.QueryRow(ctx,
+			`SELECT incident_id, entity, title, status, severity, score, stages,
+			        alert_count, first_seen, last_seen
+			 FROM incidents WHERE incident_id = $1 FOR UPDATE`, preferredID,
+		).Scan(&inc.IncidentID, &inc.Entity, &inc.Title, &inc.Status, &inc.Severity,
+			&inc.Score, &stagesRaw, &inc.AlertCount, &inc.FirstSeen, &inc.LastSeen)
+	} else {
+		// Normal path: this entity's own open incident.
+		err = tx.QueryRow(ctx,
+			`SELECT incident_id, entity, title, status, severity, score, stages,
+			        alert_count, first_seen, last_seen
+			 FROM incidents
+			 WHERE entity = $1 AND status = 'open' AND last_seen >= $2
+			 ORDER BY id DESC LIMIT 1
+			 FOR UPDATE`,
+			a.Entity, cutoff,
+		).Scan(&inc.IncidentID, &inc.Entity, &inc.Title, &inc.Status, &inc.Severity,
+			&inc.Score, &stagesRaw, &inc.AlertCount, &inc.FirstSeen, &inc.LastSeen)
+	}
 
 	isNew := false
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -59,6 +125,8 @@ func (p *Postgres) AttachAlert(ctx context.Context, a detect.Alert, idle time.Du
 		return nil, false, false, err
 	}
 
+	// Append to the timeline. The composite PK makes this idempotent:
+	// a redelivered alert inserts zero rows and we bail out unchanged.
 	stage := correlate.StageOf(a.RuleID)
 	tag, err := tx.Exec(ctx,
 		`INSERT INTO incident_alerts (incident_id, alert_id, rule_id, stage, title, severity, occurred_at)
@@ -72,6 +140,8 @@ func (p *Postgres) AttachAlert(ctx context.Context, a detect.Alert, idle time.Du
 		return &inc, false, true, tx.Commit(ctx)
 	}
 
+	// Recompute from the full timeline rather than incrementing counters —
+	// slightly more work, immune to drift if scoring rules change.
 	rows, err := tx.Query(ctx,
 		`SELECT alert_id, rule_id, stage, title, severity, occurred_at
 		 FROM incident_alerts WHERE incident_id = $1 ORDER BY occurred_at`,
